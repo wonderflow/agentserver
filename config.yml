@@ -1,0 +1,29 @@
+---
+etcd_host:
+  - 10.10.101.146:4001
+etcd_dir: /cloud_agent
+etcdjobs_dir: /jobs
+etcd_rm_dir: /removed
+tsdb_host: 10.10.101.146
+tsdb_port: 4242
+threshold:
+  sysload: 0.8
+  syscpu: 80
+  sysmempercent: 90
+  swap: 50
+  diskpercent: 80
+  router_rps_max: 500
+internal: 60
+load_percent: 3
+smtp:
+  host: smtp.zju.edu.cn
+  port: 25
+  username: wonderflow@zju.edu.cn
+  password: shmilyzju
+  mailto: wonderflow@163.com
+server:
+  host: 0.0.0.0
+  port: 50000
+inithost:
+  - 10.10.101.170
+  - 10.10.101.187
