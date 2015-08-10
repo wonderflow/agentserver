@@ -51,10 +51,10 @@ func LiveHosts(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(tt))
 }
 
-func MetricList(w http.ResponseWriter, req *http.Request) {
+func SysMetricList(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
-	res, err := json.Marshal(metric_limit_map)
+	res, err := json.Marshal(system_metric_map)
 	if err != nil {
 		http.Error(w, `{"errorMessage":" List metric error.`+fmt.Sprintf("%v", err)+`"}`, 406)
 		return
@@ -63,7 +63,7 @@ func MetricList(w http.ResponseWriter, req *http.Request) {
 	w.Write(res)
 }
 
-func MetricAdd(w http.ResponseWriter, req *http.Request) {
+func SysMetricAdd(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
 	err := req.ParseForm()
@@ -116,7 +116,7 @@ func MetricAdd(w http.ResponseWriter, req *http.Request) {
 	tt := "Metric limit not extended yet."
 
 	if str == "system" {
-		metric_limit_map[metric_name] = limit_val
+		system_metric_map[metric_name] = limit_val
 		tt = "Set metric: " + metric_name + " limit to " + metric_limit + " success!."
 		w.Write([]byte(tt))
 	} else if str == "process" {
@@ -127,7 +127,7 @@ func MetricAdd(w http.ResponseWriter, req *http.Request) {
 
 }
 
-func MetricRemove(w http.ResponseWriter, req *http.Request) {
+func SysMetricRemove(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(200)
 	err := req.ParseForm()
@@ -141,7 +141,7 @@ func MetricRemove(w http.ResponseWriter, req *http.Request) {
 
 	find := false
 
-	for key, _ := range metric_limit_map {
+	for key, _ := range system_metric_map {
 		if key == metric_name {
 			find = true
 			break
@@ -151,7 +151,7 @@ func MetricRemove(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, `{"errorMessage":"Metric didn't find :`+fmt.Sprintf("%v", metric_name)+`."}`, 406)
 		return
 	}
-	delete(metric_limit_map, metric_name)
+	delete(system_metric_map, metric_name)
 	tt := metric_name + "is deleted."
 	fmt.Println(tt)
 	w.Write([]byte(tt))

@@ -8,7 +8,7 @@
   帮用户转发一个请求，去etcd建立一个/remove目录，设置临时节点。
   临时节点的ttl为internal两倍的node，表示要去掉的节点，然后每次检查这个目录，不检查目录中的节点是否存活。
 
-* 【待解决】core number 没收进metric。这就导致system.cpu.load这个数据实际上没法真的设置阈值。解决方法：
+* 【使用方法二解决了】core number 没收进metric。这就导致system.cpu.load这个数据实际上没法真的设置阈值。解决方法：
   - ssh到每个alive的host，然后`cat /proc/cpuinfo | grep processor | sort | uniq | wc -l`
   - 在cloudagent里面加这个字段，在healthmonitor里面加这个字段的处理，发送到opentsdb。需要修改另外两个系统。
 
@@ -22,5 +22,7 @@
 * 【配置数据持久化】存到文件，然后再读出来
 
 * 【日志信息】输出日志 /log/agentserver.go文件下
+
+* 【监控进程服务化】server xx start/restart/stop
 
 —— 孙健波 2015.8.9

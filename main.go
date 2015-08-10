@@ -19,7 +19,7 @@ var (
 	client             *etcd.Client
 	conf               *Config
 	ts                 *TSDB
-	metric_limit_map   map[string]float64
+	system_metric_map  map[string]float64
 )
 
 func IsFile(file string) bool {
@@ -47,7 +47,7 @@ func GetValue(dps map[string]float64) float64 {
 	return -1
 }
 
-func CheckSysCPU() DetectIPMap {
+func CheckSysCPU(limit float64) DetectIPMap {
 	ret := map[string]float64{}
 	for i := 0; i < len(should_alived_host); i++ {
 		ip := should_alived_host[i]
@@ -58,8 +58,23 @@ func CheckSysCPU() DetectIPMap {
 		res, _ = ts.Get("system.cpu.wait", "avg", "1m-ago", ip, 0)
 		val3 := GetValue(res[0].Dps)
 		val := val1 + val2 + val3
-		if val > conf.LimitInfo.Syscpu {
+		if val > limit {
 			ret[ip] = val
+		}
+	}
+	return ret
+}
+
+func CheckSysLoad(limit float64) DetectIPMap {
+	ret := map[string]float64{}
+	for i := 0; i < len(should_alived_host); i++ {
+		ip := should_alived_host[i]
+		res, _ := ts.Get("system.load.1m", "avg", "1m-ago", ip, 0)
+		load1m := GetValue(res[0].Dps)
+		res, _ = ts.Get("system.cpu.cores", "avg", "1m-ago", ip, 0)
+		corenum := GetValue(res[0].Dps)
+		if load1m > limit*corenum {
+			ret[ip] = load1m
 		}
 	}
 	return ret
@@ -79,20 +94,27 @@ func CheckMetric(metricinfo string, limit float64) DetectIPMap {
 }
 
 func MetricInfoInit() {
-	metric_limit_map = make(map[string]float64)
-	metric_limit_map["system.mem.percent"] = conf.LimitInfo.Sysmempercent
-	metric_limit_map["system.disk.system.percent"] = conf.LimitInfo.Diskpercent
-	metric_limit_map["system.swap.percent"] = conf.LimitInfo.Swap
-	metric_limit_map["system.load.1m"] = conf.LimitInfo.Sysload
+	system_metric_map = make(map[string]float64)
+	system_metric_map["system.mem.percent"] = conf.LimitInfo.Sysmempercent
+	system_metric_map["system.disk.system.percent"] = conf.LimitInfo.Diskpercent
+	system_metric_map["system.swap.percent"] = conf.LimitInfo.Swap
+	system_metric_map["system.cpu.percent"] = conf.LimitInfo.Syscpu
+	system_metric_map["sys.load.1m"] = conf.LimitInfo.Sysload
+
 }
 
 type DetectIPMap map[string]float64
 
 func Metric_Check() map[string]DetectIPMap {
 	ret := map[string]DetectIPMap{}
-	ret["system.cpu.percent"] = CheckSysCPU()
-	for key, value := range metric_limit_map {
-		ret[key] = CheckMetric(key, value)
+	for key, value := range system_metric_map {
+		if key == "system.cpu.percent" {
+			ret[key] = CheckSysCPU(value)
+		} else if key == "sys.load.1m" {
+			ret[key] = CheckSysLoad(value)
+		} else {
+			ret[key] = CheckMetric(key, value)
+		}
 	}
 	return ret
 }
@@ -166,9 +188,9 @@ func main() {
 	http.HandleFunc("/host/remove", RemoveIP)
 	http.HandleFunc("/host/list", LiveHosts)
 	http.HandleFunc("/metrics", MetricAll)
-	http.HandleFunc("/metric/list", MetricList)
-	http.HandleFunc("/metric/add", MetricAdd)
-	http.HandleFunc("/metric/remove", MetricRemove)
+	http.HandleFunc("/metric/system/list", SysMetricList)
+	http.HandleFunc("/metric/system/add", SysMetricAdd)
+	http.HandleFunc("/metric/system/remove", SysMetricRemove)
 
 	listento := conf.Server.Host + ":" + strconv.Itoa(conf.Server.Port)
 	err = http.ListenAndServe(listento, nil)
