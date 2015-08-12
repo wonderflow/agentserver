@@ -9,8 +9,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	//	"strings"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,9 +40,11 @@ func GetConfig(config_file string) (*Config, error) {
 	return &conf, err
 }
 
-func GetValue(dps map[string]float64) float64 {
-	for _, value := range dps {
-		return value
+func GetValueFromRes(res Response) float64 {
+	if len(res) > 0 {
+		for _, value := range res[0].Dps {
+			return value
+		}
 	}
 	return -1
 }
@@ -52,11 +54,20 @@ func CheckSysCPU(limit float64) DetectIPMap {
 	for i := 0; i < len(should_alived_host); i++ {
 		ip := should_alived_host[i]
 		res, _ := ts.Get("system.cpu.sys", "avg", "1m-ago", ip, 0)
-		val1 := GetValue(res[0].Dps)
+		val1 := GetValueFromRes(res)
+		if val1 < 0 {
+			continue
+		}
 		res, _ = ts.Get("system.cpu.user", "avg", "1m-ago", ip, 0)
-		val2 := GetValue(res[0].Dps)
+		val2 := GetValueFromRes(res)
+		if val2 < 0 {
+			continue
+		}
 		res, _ = ts.Get("system.cpu.wait", "avg", "1m-ago", ip, 0)
-		val3 := GetValue(res[0].Dps)
+		val3 := GetValueFromRes(res)
+		if val3 < 0 {
+			continue
+		}
 		val := val1 + val2 + val3
 		if val > limit {
 			ret[ip] = val
@@ -70,9 +81,9 @@ func CheckSysLoad(limit float64) DetectIPMap {
 	for i := 0; i < len(should_alived_host); i++ {
 		ip := should_alived_host[i]
 		res, _ := ts.Get("system.load.1m", "avg", "1m-ago", ip, 0)
-		load1m := GetValue(res[0].Dps)
+		load1m := GetValueFromRes(res)
 		res, _ = ts.Get("system.cpu.cores", "avg", "1m-ago", ip, 0)
-		corenum := GetValue(res[0].Dps)
+		corenum := GetValueFromRes(res)
 		if load1m > limit*corenum {
 			ret[ip] = load1m
 		}
@@ -84,8 +95,14 @@ func CheckMetric(metricinfo string, limit float64) DetectIPMap {
 	ret := map[string]float64{}
 	for i := 0; i < len(should_alived_host); i++ {
 		ip := should_alived_host[i]
-		res, _ := ts.Get(metricinfo, "avg", "1m-ago", ip, 0)
-		val := GetValue(res[0].Dps)
+		res, err := ts.Get(metricinfo, "avg", "1m-ago", ip, 0)
+		if err != nil {
+			fmt.Println("Get metric info error: ", err)
+			continue
+		}
+
+		//fmt.Println(res)
+		val := GetValueFromRes(res)
 		if val > limit {
 			ret[ip] = val
 		}
@@ -105,7 +122,7 @@ func MetricInfoInit() {
 
 type DetectIPMap map[string]float64
 
-func Metric_Check() map[string]DetectIPMap {
+func SysMetric_Check() map[string]DetectIPMap {
 	ret := map[string]DetectIPMap{}
 	for key, value := range system_metric_map {
 		if key == "system.cpu.percent" {
@@ -117,6 +134,129 @@ func Metric_Check() map[string]DetectIPMap {
 		}
 	}
 	return ret
+}
+
+func isAlive(val string) bool {
+	for _, host := range should_alived_host {
+		if val == host {
+			return true
+		}
+	}
+	return false
+}
+
+type Job struct {
+	Name  string
+	Index int
+}
+
+func GetJobList() (losted_job []string, jobs []Job) {
+	resp, err := client.Get(conf.Etcdjobs_dir, true, true)
+	if err != nil {
+		fmt.Println("Get etcd job list error: ", err)
+	}
+
+	for _, val := range resp.Node.Nodes {
+		subres, err := client.Get(val.Key, true, true)
+		if err != nil {
+			fmt.Println("Get etcd job list error: ", err)
+		}
+		find := false
+		jobname := strings.Split(val.Key, "/")[2]
+		k := 0
+		for _, subval := range subres.Node.Nodes {
+			if isAlive(subval.Value) {
+				find = true
+				jobs = append(jobs, Job{jobname, k})
+				k++
+			}
+		}
+		if find == false {
+			losted_job = append(losted_job, jobname)
+		}
+	}
+	return
+}
+
+func CheckProcessMonitor(jobs []Job) (unmonitoredjobs []Job) {
+	for _, val := range jobs {
+		res, _ := ts.Get("process.process.monitor", "avg", "1m-ago", val.Name, val.Index)
+		monitor := GetValueFromRes(res)
+		if monitor != 1 {
+			unmonitoredjobs = append(unmonitoredjobs, val)
+		}
+	}
+	return
+}
+
+func CheckProcessStatus(jobs []Job) (unstatedjobs []Job) {
+	for _, val := range jobs {
+		res, _ := ts.Get("process.process.status", "avg", "1m-ago", val.Name, val.Index)
+
+		status := GetValueFromRes(res)
+		if status != 0 {
+			unstatedjobs = append(unstatedjobs, val)
+		}
+	}
+	return
+}
+
+func CheckProcessMem(jobs []Job) (outmemjobs []Job) {
+	for _, val := range jobs {
+
+		res, _ := ts.Get("process.cpu.percent", "avg", "1m-ago", val.Name, val.Index)
+		mem := GetValueFromRes(res)
+		if mem > conf.LimitInfo.Sysmempercent { //todo: 暂时用系统的limit？
+			outmemjobs = append(outmemjobs, val)
+		}
+	}
+	return
+}
+
+func ProcessMetric_Check() (process_msg string) {
+	process_msg = ""
+	losted_job, jobs := GetJobList()
+	if len(losted_job) > 0 {
+		process_msg += "\nJobs losted: \n"
+	}
+
+	for _, val := range losted_job {
+		process_msg += val + "\n"
+	}
+
+	unmonitoredjobs := CheckProcessMonitor(jobs)
+	if len(unmonitoredjobs) > 0 {
+		process_msg += "\nJobs unmonitored: \n"
+		for _, val := range unmonitoredjobs {
+			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+		}
+	}
+
+	unstatedjobs := CheckProcessStatus(jobs)
+
+	if len(unstatedjobs) > 0 {
+		process_msg += "\nJobs status wrong: \n"
+		for _, val := range unstatedjobs {
+			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+		}
+	}
+
+	outmemjobs := CheckProcessMem(jobs)
+
+	if len(outmemjobs) > 0 {
+		process_msg += "\nJobs out of memory: \n"
+		for _, val := range outmemjobs {
+			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+		}
+
+	}
+
+	//TODO
+	// checkMonitorStatus => process.process.monitor  == 1 //done
+	// checkProcessStatus => process.process.status  == 0 // done to be test
+	// checkProcessCpu => process.cpu.percenttotal 这个不能超过配置
+	// process.mem.percent
+	return process_msg
 }
 
 func Check() {
@@ -131,7 +271,9 @@ func Check() {
 			}
 		}
 
-		metricIP := Metric_Check()
+		metricIP := SysMetric_Check()
+
+		ProcessMetric_Check()
 
 		for key, value := range metricIP {
 			if len(value) > 0 {

@@ -153,7 +153,7 @@ func (m *TSDB) Get(metric string, aggregator string, relative_time string, job s
 	}
 	if resp.StatusCode != 200 {
 		fmt.Printf("Request tsdb error with response code: %v\n", resp.StatusCode)
-		fmt.Println("Requst info: ", reqJSON)
+		fmt.Println("Requst info: ", string(reqJSON))
 		return Response{}, err
 	}
 
