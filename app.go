@@ -1,7 +1,5 @@
 package main
 
-import ()
-
 type Metadata struct {
 	Guid string `json:"guid"`
 	Url  string `json:"url,omitempty"`

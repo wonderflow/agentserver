@@ -12,10 +12,10 @@ import (
 	"strings"
 )
 
-func GetAppInstances(v url.Values) {
-	token := GetAuthToken(v)
+func ListCFAPP(token string) *PaginatedApplicationResources {
 	client := http.Client{}
-	path := Sprintf("%s/v2/apps", "http://api.local.lai")
+	cfapiurl := "http://api." + conf.Cf_url
+	path := Sprintf("%s/v2/apps", cfapiurl)
 	req, _ := http.NewRequest("GET", path, nil)
 	req.Header.Set("Authorization", "bearer "+token)
 	req.Header.Set("Accept", "application/json")
@@ -25,34 +25,39 @@ func GetAppInstances(v url.Values) {
 	}
 	buff := new(bytes.Buffer)
 	buff.ReadFrom(resp.Body)
-	//Println("%v", buff)
+	Println("%v", buff)
 	Apps := new(PaginatedApplicationResources)
 	_ = json.Unmarshal(buff.Bytes(), Apps)
-	//Println(Apps.Resources[0].Metadata.Guid)
-	for _, resource := range Apps.Resources {
-		HttpClient := http.Client{}
-		path = Sprintf("%s/v2/apps/"+resource.Metadata.Guid+"/instances", "http://api.local.lai")
-		HttpReq, _ := http.NewRequest("GET", path, nil)
-		HttpReq.Header.Set("Authorization", "bearer "+token)
-		HttpReq.Header.Set("Accept", "application/json")
-		HttpResp, err := HttpClient.Do(HttpReq)
-		if err != nil {
-			Println(err.Error())
-		}
-		Buff := new(bytes.Buffer)
-		Buff.ReadFrom(HttpResp.Body)
-		Inst := make(map[string]map[string]interface{})
-		err = json.Unmarshal(Buff.Bytes(), &Inst)
-		if err != nil {
+	return Apps
+}
+
+func GetAppInstances(resource ApplicationResource, token string) int {
+	cfapiurl := "http://api." + conf.Cf_url
+	HttpClient := http.Client{}
+	path := Sprintf("%s/v2/apps/"+resource.Metadata.Guid+"/instances", cfapiurl)
+	HttpReq, _ := http.NewRequest("GET", path, nil)
+	HttpReq.Header.Set("Authorization", "bearer "+token)
+	HttpReq.Header.Set("Accept", "application/json")
+	HttpResp, err := HttpClient.Do(HttpReq)
+	if err != nil {
+		Println(err.Error())
+	}
+	Buff := new(bytes.Buffer)
+	Buff.ReadFrom(HttpResp.Body)
+	Inst := make(map[string]map[string]interface{})
+	err = json.Unmarshal(Buff.Bytes(), &Inst)
+	if err != nil {
+		//restart app
+	}
+	ans := 0
+	for _, instance := range Inst {
+		//Println(index, instance["state"])
+		if instance["state"] == "RUNNING" {
 			//restart app
-		}
-		for _, instance := range Inst {
-			//Println(index, instance["state"])
-			if instance["state"] != "RUNNING" {
-				//restart app
-			}
+			ans++
 		}
 	}
+	return ans
 }
 func GetAuthToken(data url.Values) string {
 	type uaaErrorResponse struct {
@@ -65,7 +70,7 @@ func GetAuthToken(data url.Values) string {
 		RefreshToken string           `json:"refresh_token"`
 		Error        uaaErrorResponse `json:"error"`
 	}
-	path := Sprintf("%s/oauth/token", "http://uaa.local.lai")
+	path := Sprintf("%s/oauth/token", "http://uaa."+conf.Cf_url)
 	client := http.Client{}
 	body := ioutil.NopCloser(strings.NewReader(data.Encode())) //把form数据编下码
 	req, _ := http.NewRequest("POST", path, body)
@@ -82,10 +87,3 @@ func GetAuthToken(data url.Values) string {
 	_ = json.Unmarshal(buff.Bytes(), &response)
 	return response.AccessToken
 }
-//func main() {
-//	v := url.Values{}
-//	v.Set("grant_type", "password")
-//	v.Set("username", "admin")
-//	v.Set("password", "c1oudc0w")
-//	GetAppInstances(v)
-//}

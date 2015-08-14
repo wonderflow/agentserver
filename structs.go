@@ -35,4 +35,6 @@ type Config struct {
 	Smtp         SMTPinfo  `yaml:"smtp"`
 	Server       Server    `yaml:"server“`
 	InitHost     []string  `yaml:"inithost"`
+	InitJobs     []string  `yaml:"initjobs"`
+	Cf_url       string    `yaml:"cf_url"`
 }

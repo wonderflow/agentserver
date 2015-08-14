@@ -2,6 +2,7 @@ package main
 
 import (
 	//	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/coreos/go-etcd/etcd"
@@ -10,12 +11,14 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
+	//	"strings"
+	//	"net/url"
 	"time"
 )
 
 var (
 	should_alived_host []string
+	should_alived_jobs []string
 	client             *etcd.Client
 	conf               *Config
 	ts                 *TSDB
@@ -146,11 +149,12 @@ func isAlive(val string) bool {
 }
 
 type Job struct {
-	Name  string
-	Index int
+	Jobname string
+	IP      string
+	Index   int
 }
 
-func GetJobList() (losted_job []string, jobs []Job) {
+func GetJobList() (jobs []Job) {
 	resp, err := client.Get(conf.Etcdjobs_dir, true, true)
 	if err != nil {
 		fmt.Println("Get etcd job list error: ", err)
@@ -161,18 +165,11 @@ func GetJobList() (losted_job []string, jobs []Job) {
 		if err != nil {
 			fmt.Println("Get etcd job list error: ", err)
 		}
-		find := false
-		jobname := strings.Split(val.Key, "/")[2]
-		k := 0
+
 		for _, subval := range subres.Node.Nodes {
-			if isAlive(subval.Value) {
-				find = true
-				jobs = append(jobs, Job{jobname, k})
-				k++
-			}
-		}
-		if find == false {
-			losted_job = append(losted_job, jobname)
+			tmpJob := Job{}
+			json.Unmarshal([]byte(subval.Value), &tmpJob)
+			jobs = append(jobs, tmpJob)
 		}
 	}
 	return
@@ -180,7 +177,7 @@ func GetJobList() (losted_job []string, jobs []Job) {
 
 func CheckProcessMonitor(jobs []Job) (unmonitoredjobs []Job) {
 	for _, val := range jobs {
-		res, _ := ts.Get("process.process.monitor", "avg", "1m-ago", val.Name, val.Index)
+		res, _ := ts.Get("process.process.monitor", "avg", "1m-ago", val.Jobname, val.Index)
 		monitor := GetValueFromRes(res)
 		if monitor != 1 {
 			unmonitoredjobs = append(unmonitoredjobs, val)
@@ -191,7 +188,7 @@ func CheckProcessMonitor(jobs []Job) (unmonitoredjobs []Job) {
 
 func CheckProcessStatus(jobs []Job) (unstatedjobs []Job) {
 	for _, val := range jobs {
-		res, _ := ts.Get("process.process.status", "avg", "1m-ago", val.Name, val.Index)
+		res, _ := ts.Get("process.process.status", "avg", "1m-ago", val.Jobname, val.Index)
 
 		status := GetValueFromRes(res)
 		if status != 0 {
@@ -203,8 +200,7 @@ func CheckProcessStatus(jobs []Job) (unstatedjobs []Job) {
 
 func CheckProcessMem(jobs []Job) (outmemjobs []Job) {
 	for _, val := range jobs {
-
-		res, _ := ts.Get("process.cpu.percent", "avg", "1m-ago", val.Name, val.Index)
+		res, _ := ts.Get("process.cpu.percent", "avg", "1m-ago", val.Jobname, val.Index)
 		mem := GetValueFromRes(res)
 		if mem > conf.LimitInfo.Sysmempercent { //todo: 暂时用系统的limit？
 			outmemjobs = append(outmemjobs, val)
@@ -213,14 +209,31 @@ func CheckProcessMem(jobs []Job) (outmemjobs []Job) {
 	return
 }
 
+func CheckJobList(jobs []Job) (losted_jobs []string) {
+	for _, val := range should_alived_jobs {
+		find := false
+		for _, job := range jobs {
+			if job.Jobname == val {
+				find = true
+				break
+			}
+		}
+		if !find {
+			losted_jobs = append(losted_jobs, val)
+		}
+	}
+	return
+}
+
 func ProcessMetric_Check() (process_msg string) {
 	process_msg = ""
-	losted_job, jobs := GetJobList()
-	if len(losted_job) > 0 {
+	jobs := GetJobList()
+	losted_jobs := CheckJobList(jobs)
+
+	if len(losted_jobs) > 0 {
 		process_msg += "\nJobs losted: \n"
 	}
-
-	for _, val := range losted_job {
+	for _, val := range losted_jobs {
 		process_msg += val + "\n"
 	}
 
@@ -228,7 +241,7 @@ func ProcessMetric_Check() (process_msg string) {
 	if len(unmonitoredjobs) > 0 {
 		process_msg += "\nJobs unmonitored: \n"
 		for _, val := range unmonitoredjobs {
-			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+			process_msg += val.Jobname + "\t" + strconv.Itoa(val.Index)
 		}
 	}
 
@@ -237,7 +250,7 @@ func ProcessMetric_Check() (process_msg string) {
 	if len(unstatedjobs) > 0 {
 		process_msg += "\nJobs status wrong: \n"
 		for _, val := range unstatedjobs {
-			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+			process_msg += val.Jobname + "\t" + strconv.Itoa(val.Index)
 		}
 	}
 
@@ -246,7 +259,7 @@ func ProcessMetric_Check() (process_msg string) {
 	if len(outmemjobs) > 0 {
 		process_msg += "\nJobs out of memory: \n"
 		for _, val := range outmemjobs {
-			process_msg += val.Name + "\t" + strconv.Itoa(val.Index)
+			process_msg += val.Jobname + "\t" + strconv.Itoa(val.Index)
 		}
 
 	}
@@ -314,6 +327,7 @@ func main() {
 	conf = tempconf
 
 	should_alived_host = conf.InitHost
+	should_alived_jobs = conf.InitJobs
 
 	machines := []string{}
 	for i := 0; i < len(conf.Etcd_host); i++ {
@@ -325,14 +339,15 @@ func main() {
 		port: conf.Tsdb_port,
 	}
 	MetricInfoInit()
-
+	//	AppCheck()
 	go Check()
-	http.HandleFunc("/host/remove", RemoveIP)
-	http.HandleFunc("/host/list", LiveHosts)
+	http.HandleFunc("/remove", Remove)
+	http.HandleFunc("/list", Alived)
 	http.HandleFunc("/metrics", MetricAll)
 	http.HandleFunc("/metric/system/list", SysMetricList)
 	http.HandleFunc("/metric/system/add", SysMetricAdd)
 	http.HandleFunc("/metric/system/remove", SysMetricRemove)
+	http.HandleFunc("/app/list", AppCheck)
 
 	listento := conf.Server.Host + ":" + strconv.Itoa(conf.Server.Port)
 	err = http.ListenAndServe(listento, nil)

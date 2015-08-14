@@ -27,3 +27,9 @@ server:
 inithost:
   - 10.10.101.170
   - 10.10.101.187
+initjobs:
+  - nginx_ccng
+  - warden
+  - cloud_controller_ng
+  - dea_next
+cf_url: local.lai

@@ -4,47 +4,114 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
 
-func RemoveIP(w http.ResponseWriter, req *http.Request) {
+func Remove(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	req.ParseForm()
 	ip := req.Form.Get("ip")
 	if ip == "" {
-		http.Error(w, `{"errorMessage":"`+fmt.Sprintf("No ip set = %s", ip)+`"}`, 406)
+		ip = req.Form.Get("host")
+	}
+
+	jobname := req.Form.Get("job")
+
+	if ip == "" && jobname == "" {
+		http.Error(w, `{"errorMessage":"`+fmt.Sprintf("No host/ip or job set = %s", ip)+`"}`, 406)
 		return
 	}
-	find := false
-	i := 0
-	for ; i < len(should_alived_host); i++ {
-		if should_alived_host[i] == ip {
-			find = true
-			break
+	var find bool
+	tt := ""
+	if ip != "" {
+		find = false
+		for i := 0; i < len(should_alived_host); i++ {
+			if should_alived_host[i] == ip {
+				find = true
+				break
+			}
 		}
-	}
-	if find == false {
-		http.Error(w, `{"errorMessage":" No such IP find."}`, 406)
-		return
+		if find == false {
+			http.Error(w, `{"errorMessage":" No such IP find."}`, 406)
+			return
+		}
+		response, err := client.AddChild(conf.Etcd_rm_dir, ip, uint64(conf.Internal*3))
+		if err != nil {
+			http.Error(w, `{"errorMessage":" Server connect etcd error.`+fmt.Sprintf("%v", err)+`"}`, 406)
+			return
+		}
+		tt = "Agent node removed in agentserver, Please shutdown your agent, if not, it will auto added again in " + strconv.Itoa(conf.Internal*2) + "s.\nEtcd response : " + fmt.Sprintf("%v", response.Node)
 	}
 
-	response, err := client.AddChild(conf.Etcd_rm_dir, ip, uint64(conf.Internal*3))
-	if err != nil {
-		http.Error(w, `{"errorMessage":" Server connect etcd error.`+fmt.Sprintf("%v", err)+`"}`, 406)
-		return
+	if jobname != "" {
+		find = false
+		for i := 0; i < len(should_alived_jobs); i++ {
+			if should_alived_jobs[i] == jobname {
+				find = true
+				break
+			}
+		}
+		if find == false {
+			http.Error(w, `{"errorMessage":" No such IP find."}`, 406)
+			return
+		}
+		response, err := client.AddChild(conf.Etcd_rm_dir, jobname, uint64(conf.Internal*3))
+		if err != nil {
+			http.Error(w, `{"errorMessage":" Server connect etcd error.`+fmt.Sprintf("%v", err)+`"}`, 406)
+			return
+		}
+		tt = "Job node removed in agentserver, Please shutdown your job, if not, it will auto added again in " + strconv.Itoa(conf.Internal*2) + "s.\nEtcd response : " + fmt.Sprintf("%v", response.Node)
 	}
 
-	tt := "Agent node removed in agentserver, Please shutdown your agent, if not, it will auto added again in " + strconv.Itoa(conf.Internal*2) + "s.\nEtcd response : " + fmt.Sprintf("%v", response.Node)
 	fmt.Println(tt)
 	w.WriteHeader(200)
 	w.Write([]byte(tt))
 }
-func LiveHosts(w http.ResponseWriter, req *http.Request) {
+
+func AppCheck(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	v := url.Values{}
+	v.Set("grant_type", "password")
+	v.Set("username", "admin")
+	v.Set("password", "c1oudc0w")
+	token := GetAuthToken(v)
+
 	tt := ""
+
+	Apps := ListCFAPP(token)
+	for _, val := range Apps.Resources {
+		ins := GetAppInstances(val, token)
+		tt += val.Entity.Name + "\t" + val.Entity.State + "\t" + strconv.Itoa(ins) + "/" + strconv.Itoa(val.Entity.Instances) + "\n"
+	}
+	fmt.Println(tt)
+	w.WriteHeader(200)
+	w.Write([]byte(tt))
+
+}
+
+func Alived(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	req.ParseForm()
+	tp := req.Form.Get("type")
+	tt := ""
+	hoststr := "Standard hosts list as below:\n"
+	jobstr := "Standard jobs list as below:"
 	for i := 0; i < len(should_alived_host); i++ {
-		tt += should_alived_host[i] + "\n"
+		hoststr += should_alived_host[i] + "\n"
+	}
+	for i := 0; i < len(should_alived_jobs); i++ {
+		jobstr += should_alived_jobs[i] + "\n"
+	}
+
+	if tp == "host" || tp == "ip" {
+		tt += hoststr
+	} else if tp == "job" {
+		tt += jobstr
+	} else {
+		tt += hoststr
+		tt += jobstr
 	}
 	fmt.Println(tt)
 	w.WriteHeader(200)
